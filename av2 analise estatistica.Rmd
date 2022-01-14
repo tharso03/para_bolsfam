@@ -1,0 +1,120 @@
+---
+title: "Avaliação 2 - Análise Estatística"
+author: "Tharso Monteiro"
+date: "11/8/2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE,
+                      warning = FALSE,
+                      message = FALSE)
+library(readr)
+library(fpp3)
+library(tsibble)
+library(lubridate)
+library(fable)
+```
+
+# Introdução
+
+O projeto abaixo visa a análise e modelagem da série temporal com informações acerca do número de famílias beneficiadas pelo programa Bolsa Família no estado do Pará. Os dados estão disponíveis no site do CECAD (\url{https://cecad.cidadania.gov.br/}).
+
+Todos os códigos abaixo estão na linguagem R.
+
+
+
+
+
+# Importação e modificação dos dados
+
+Importamos os dados através da planilha disponível no site citado acima. Exibimos as primeiras 10 colunas da mesma.
+
+```{r, echo = FALSE, warning=FALSE, message= FALSE}
+data <- read_csv("excel_data.csv")
+
+knitr::kable(head(data))
+```
+
+```{r}
+per <- seq(ymd('2021-10-01'),ymd('2004-01-01'), by = '-1 month')
+
+
+data$periodo <- per
+
+data <- data %>%
+  mutate(
+  Month = yearmonth(periodo)
+)%>%
+  select(-periodo)%>%
+  as_tsibble(index = Month)
+
+data$fben <- data$fben * 1000
+
+data$fben <- round(data$fben)
+```
+
+
+Abaixo, está ilustrado o número mensal de famílias beneficiárias do bolsa família no Pará de janeiro de 2004 a outubro de 2021. Vê-se que há uma tendência crescente na série, até as últimas observações, em que a série parece haver atingido um platô.
+
+```{r}
+autoplot(data)+
+  xlab('Período')+
+  ylab('Famílias beneficiadas')
+```
+Fazendo a decomposição STL na série, confirmamos a análise feita anteriormente. Vê-se que o componente de tendência é bem mais influente que o componente sazonal.
+
+
+```{r}
+data %>%
+  model(
+    STL(fben ~ trend(window = 12)+
+          season(window = 'periodic')))%>%
+  components()%>%
+  autoplot()
+```
+Em seguida, utilizamos um modelo ARIMA para explicar a série. A ordem do processo foi escolhida de maneira automática, com base na minimização do AIC (Akaike Information Criterion). O modelo escolhido foi o ARIMA(1,2,2).
+
+
+```{r}
+autoarima_fit <- data %>%
+  model(
+    auto = ARIMA(fben)
+  )
+```
+
+Analisamos o gŕafico dos resíduos após a modelagem:
+
+```{r}
+autoarima_fit %>% gg_tsresiduals()
+```
+Os resíduos não seguem uma distribuição normal. Isso se deve à natureza inteira da série.
+
+Os resíduos parecem ser um ruído branco. Confirmamos isto com um teste de Ljung-Box, que retornou um valor-p de 0.73.
+
+
+```{r}
+ljung_box(resid(autoarima_fit)$.resid)
+```
+Finalmente, fazemos previsões para os próximos 12 meses com base no modelo ajustado.
+
+
+```{r}
+fabletools::forecast(autoarima_fit, h = 12)%>%
+  filter(.model == 'auto')%>%
+  autoplot(data)+
+  xlab('Período')+
+  ylab('Famílias beneficiadas')
+```
+Nosso modelo prevê uma ascenção de famílias beneficiárias nos próximos 12 meses. Os dados em formato de tablea estão descritos abaixo:
+
+
+```{r}
+knitr::kable(fabletools::forecast(autoarima_fit, h = 12)[,c('Month','.mean')])
+```
+
+Também foi testado manulamente o modelo ARIMA(0,2,1), com resultados praticamente idênticos.
+
+
+
+
